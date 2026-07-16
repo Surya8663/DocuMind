@@ -45,6 +45,8 @@ INSTALLED_APPS = [
     # Third-party apps
     "rest_framework",
     "corsheaders",
+    # Local apps
+    "accounts",
 ]
 
 MIDDLEWARE = [
@@ -184,3 +186,6 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Custom User Model for Multi-Tenancy
+AUTH_USER_MODEL = "accounts.User"
