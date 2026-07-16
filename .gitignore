@@ -84,7 +84,6 @@ ipython_config.py
 
 # poetry
 .poetry/
-poetry.lock
 
 # pdm
 .pdm-plugins/
