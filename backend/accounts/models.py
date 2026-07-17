@@ -39,6 +39,7 @@ from django.contrib.auth.models import (
     BaseUserManager,
     PermissionsMixin,
 )
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
 
@@ -165,3 +166,174 @@ class User(AbstractBaseUser, PermissionsMixin):
     def __str__(self) -> str:
         tenant_name = self.tenant.name if self.tenant else "Global/System"
         return f"{self.email} ({self.role} @ {tenant_name})"
+
+
+class Document(models.Model):
+    """Represents a raw document uploaded by a user within a tenant's corpus."""
+
+    class FileType(models.TextChoices):
+        PDF = "PDF", "PDF Document"
+        DOCX = "DOCX", "Word Document"
+        TXT = "TXT", "Text File"
+
+    class DocType(models.TextChoices):
+        POLICY = "POLICY", "Policy"
+        CONTRACT = "CONTRACT", "Contract"
+        REPORT = "REPORT", "Report"
+        OTHER = "OTHER", "Other"
+
+    class Status(models.TextChoices):
+        UPLOADED = "UPLOADED", "Uploaded"
+        PROCESSING = "PROCESSING", "Processing"
+        INDEXED = "INDEXED", "Indexed"
+        FAILED = "FAILED", "Failed"
+
+    id: models.UUIDField = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
+    tenant: models.ForeignKey = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="documents",
+        db_index=True,
+    )
+    uploaded_by: models.ForeignKey = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_documents",
+    )
+    title: models.CharField = models.CharField(max_length=255)
+    file_type: models.CharField = models.CharField(
+        max_length=10,
+        choices=FileType.choices,
+    )
+    blob_storage_path: models.CharField = models.CharField(max_length=1024)
+    doc_type: models.CharField = models.CharField(
+        max_length=20,
+        choices=DocType.choices,
+        default=DocType.OTHER,
+    )
+    status: models.CharField = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.UPLOADED,
+    )
+    uploaded_at: models.DateTimeField = models.DateTimeField(auto_now_add=True)
+    indexed_at: models.DateTimeField = models.DateTimeField(null=True, blank=True)
+    page_count: models.IntegerField = models.IntegerField(null=True, blank=True)
+    checksum: models.CharField = models.CharField(max_length=64, db_index=True)
+
+    def __str__(self) -> str:
+        return f"{self.title} ({self.file_type}) - {self.tenant.name}"
+
+
+class DocumentChunk(models.Model):
+    """Represents a parsed text chunk from a document, processed with embeddings.
+
+    DENORMALIZATION RATIONALE:
+    We explicitly denormalize `tenant_id` onto the DocumentChunk model.
+    In a multi-tenant enterprise system, boundary isolation is critical. Direct vector indexing,
+    bulk deletion, and retrieval searches filter by `tenant_id` first. Denormalizing this field
+    prevents doing SQL JOIN queries back to the Document table for every single chunk retrieval,
+    reducing latency and ensuring zero risk of cross-tenant data leaks.
+    """
+
+    id: models.UUIDField = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
+    document: models.ForeignKey = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="chunks",
+    )
+    tenant: models.ForeignKey = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="chunks",
+    )
+    chunk_index: models.IntegerField = models.IntegerField()
+    content: models.TextField = models.TextField()
+    token_count: models.IntegerField = models.IntegerField()
+    azure_search_doc_id: models.CharField = models.CharField(max_length=255)
+    embedding_model: models.CharField = models.CharField(max_length=100)
+    created_at: models.DateTimeField = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # Composite index for optimized scoped chunk retrievals per document
+        indexes = [
+            models.Index(fields=["tenant", "document"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Chunk {self.chunk_index} of {self.document.title}"
+
+
+class QueryLog(models.Model):
+    """Represents an audit log of a user query and the grounding chunks retrieved."""
+
+    id: models.UUIDField = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
+    tenant: models.ForeignKey = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="query_logs",
+    )
+    user: models.ForeignKey = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="query_logs",
+    )
+    query_text: models.TextField = models.TextField()
+    # ARRAYFIELD VS JSONFIELD CHOICE:
+    # ArrayField is used to store the list of UUIDs representing retrieved chunks.
+    # It guarantees type-safety (strictly UUIDs), supports Postgres-native array indexing (GIN),
+    # and optimizes JOINs and aggregate query speeds compared to unstructured JSONField string parsing.
+    retrieved_chunk_ids: ArrayField = ArrayField(models.UUIDField())
+    answer_text: models.TextField = models.TextField()
+    confidence_score: models.FloatField = models.FloatField()
+    escalated: models.BooleanField = models.BooleanField(default=False)
+    latency_ms: models.IntegerField = models.IntegerField()
+    azure_search_latency_ms: models.IntegerField = models.IntegerField()
+    llm_latency_ms: models.IntegerField = models.IntegerField()
+    created_at: models.DateTimeField = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"Query by {self.user.email if self.user else 'System'} at {self.created_at}"
+
+
+class Feedback(models.Model):
+    """Represents explicit user rating and comments on a generated response."""
+
+    class Rating(models.TextChoices):
+        THUMBS_UP = "THUMBS_UP", "Thumbs Up"
+        THUMBS_DOWN = "THUMBS_DOWN", "Thumbs Down"
+
+    id: models.UUIDField = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
+    query_log: models.ForeignKey = models.ForeignKey(
+        QueryLog,
+        on_delete=models.CASCADE,
+        related_name="feedbacks",
+    )
+    user: models.ForeignKey = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="feedbacks",
+    )
+    rating: models.CharField = models.CharField(
+        max_length=20,
+        choices=Rating.choices,
+    )
+    comment: models.TextField = models.TextField(null=True, blank=True)
+    created_at: models.DateTimeField = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"Feedback {self.rating} on Query {self.query_log.id}"
