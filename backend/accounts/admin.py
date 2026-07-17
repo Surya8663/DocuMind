@@ -2,7 +2,7 @@ from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import Tenant, User
+from .models import Document, DocumentChunk, Feedback, QueryLog, Tenant, User
 
 
 class UserChangeForm(forms.ModelForm):
@@ -95,3 +95,65 @@ class UserAdmin(BaseUserAdmin):
     )
 
     filter_horizontal = ("groups", "user_permissions")
+
+
+@admin.register(Document)
+class DocumentAdmin(admin.ModelAdmin):
+    """Admin configuration for Document model."""
+
+    list_display = (
+        "title",
+        "file_type",
+        "doc_type",
+        "tenant",
+        "status",
+        "uploaded_at",
+        "page_count",
+    )
+    list_filter = ("file_type", "doc_type", "status", "tenant")
+    search_fields = ("title", "checksum")
+    ordering = ("-uploaded_at",)
+
+
+@admin.register(DocumentChunk)
+class DocumentChunkAdmin(admin.ModelAdmin):
+    """Admin configuration for DocumentChunk model."""
+
+    list_display = (
+        "document",
+        "chunk_index",
+        "token_count",
+        "tenant",
+        "created_at",
+    )
+    list_filter = ("tenant", "embedding_model")
+    search_fields = ("content", "azure_search_doc_id")
+    ordering = ("document", "chunk_index")
+
+
+@admin.register(QueryLog)
+class QueryLogAdmin(admin.ModelAdmin):
+    """Admin configuration for QueryLog model."""
+
+    list_display = (
+        "query_text",
+        "user",
+        "tenant",
+        "confidence_score",
+        "escalated",
+        "latency_ms",
+        "created_at",
+    )
+    list_filter = ("escalated", "tenant", "created_at")
+    search_fields = ("query_text", "answer_text")
+    ordering = ("-created_at",)
+
+
+@admin.register(Feedback)
+class FeedbackAdmin(admin.ModelAdmin):
+    """Admin configuration for Feedback model."""
+
+    list_display = ("query_log", "user", "rating", "created_at")
+    list_filter = ("rating", "created_at")
+    search_fields = ("comment",)
+    ordering = ("-created_at",)
