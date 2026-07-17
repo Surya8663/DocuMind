@@ -64,8 +64,8 @@ jobs:
       - name: Run Mypy Type Checker
         run: poetry run mypy .
 
-      - name: Run Django Tests
-        run: poetry run python manage.py test
+      - name: Run Pytest Test Suite
+        run: poetry run pytest
         env:
           DJANGO_SECRET_KEY: 'django-insecure-ci-secret-key-not-for-production-use-value'
           DJANGO_DEBUG: 'True'
