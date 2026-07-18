@@ -42,6 +42,8 @@ from django.contrib.auth.models import (
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
+from core.managers import TenantScopedManager
+
 
 class Tenant(models.Model):
     """Represents a customer organization or tenant within the DocuMind system."""
@@ -171,6 +173,8 @@ class User(AbstractBaseUser, PermissionsMixin):
 class Document(models.Model):
     """Represents a raw document uploaded by a user within a tenant's corpus."""
 
+    objects = TenantScopedManager()
+
     class FileType(models.TextChoices):
         PDF = "PDF", "PDF Document"
         DOCX = "DOCX", "Word Document"
@@ -240,6 +244,8 @@ class DocumentChunk(models.Model):
     reducing latency and ensuring zero risk of cross-tenant data leaks.
     """
 
+    objects = TenantScopedManager()
+
     id: models.UUIDField = models.UUIDField(
         primary_key=True, default=uuid.uuid4, editable=False
     )
@@ -272,6 +278,8 @@ class DocumentChunk(models.Model):
 
 class QueryLog(models.Model):
     """Represents an audit log of a user query and the grounding chunks retrieved."""
+
+    objects = TenantScopedManager()
 
     id: models.UUIDField = models.UUIDField(
         primary_key=True, default=uuid.uuid4, editable=False
@@ -308,6 +316,8 @@ class QueryLog(models.Model):
 
 class Feedback(models.Model):
     """Represents explicit user rating and comments on a generated response."""
+
+    objects = TenantScopedManager()
 
     class Rating(models.TextChoices):
         THUMBS_UP = "THUMBS_UP", "Thumbs Up"
